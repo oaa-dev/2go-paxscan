@@ -1,0 +1,13 @@
+root = false
+
+[*.cs]
+indent_size = 4
+csharp_style_namespace_declarations = file_scoped:warning
+csharp_using_directive_placement = outside_namespace
+dotnet_sort_system_directives_first = true
+# ConfigureAwait is irrelevant in app code (no sync context in API; WPF wants the UI context).
+dotnet_diagnostic.CA2007.severity = none
+# Primary-constructor style DI is fine.
+dotnet_diagnostic.IDE0290.severity = none
+# Result<T>.Success/Failure factories are the idiomatic shape.
+dotnet_diagnostic.CA1000.severity = none

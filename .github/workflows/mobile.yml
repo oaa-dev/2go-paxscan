@@ -1,0 +1,31 @@
+name: mobile
+
+on:
+  push:
+    paths: ["paxscan-mobile/**", "contracts/**", ".github/workflows/mobile.yml"]
+  pull_request:
+    paths: ["paxscan-mobile/**", "contracts/**", ".github/workflows/mobile.yml"]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: paxscan-mobile
+    steps:
+      - uses: actions/checkout@v5
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.47.7
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - name: Drift code generation
+        working-directory: paxscan-mobile/packages/paxscan_core
+        run: dart run build_runner build --delete-conflicting-outputs
+      - name: Core (headless)
+        working-directory: paxscan-mobile/packages/paxscan_core
+        run: dart analyze --fatal-infos && dart test
+      - name: App
+        working-directory: paxscan-mobile/app
+        run: flutter analyze && flutter test

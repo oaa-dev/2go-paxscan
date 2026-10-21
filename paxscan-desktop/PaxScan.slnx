@@ -1,0 +1,17 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/PaxScan.Application/PaxScan.Application.csproj" />
+    <Project Path="src/PaxScan.Desktop/PaxScan.Desktop.csproj" />
+    <Project Path="src/PaxScan.Domain/PaxScan.Domain.csproj" />
+    <Project Path="src/PaxScan.HubApi/PaxScan.HubApi.csproj" />
+    <Project Path="src/PaxScan.Infrastructure/PaxScan.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/PaxScan.Application.Tests/PaxScan.Application.Tests.csproj" />
+    <Project Path="tests/PaxScan.Domain.Tests/PaxScan.Domain.Tests.csproj" />
+    <Project Path="tests/PaxScan.HubApi.Tests/PaxScan.HubApi.Tests.csproj" />
+  </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/PaxScan.HubDevHost/PaxScan.HubDevHost.csproj" />
+  </Folder>
+</Solution>

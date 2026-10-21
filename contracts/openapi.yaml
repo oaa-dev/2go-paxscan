@@ -1,0 +1,592 @@
+openapi: 3.1.0
+info:
+  title: PaxScan API
+  version: 0.1.0
+  description: |
+    Source of truth for every PaxScan HTTP interface.
+
+    * **Online API** (Laravel, `/api/v1/*`): admin portal + desktop hub sync. Every response is
+      wrapped in the `{success, message, data}` envelope.
+    * **Hub API** (desktop's embedded Kestrel, `/v1/*`): mobile pairing + sync over HTTPS with a
+      pinned self-signed certificate. Errors are RFC 9457 `ProblemDetails`.
+
+    Sync rules:
+    * Every status update has a device-generated UUIDv7 `id`; re-sending is always safe.
+    * A device marks an update acked only on an explicit per-item result.
+    * Device clocks never decide outcomes; ordering is `hub_received_at`, then `device_seq`.
+servers:
+  - url: http://localhost:8000
+    description: Online API (local)
+  - url: https://192.168.137.1:5443
+    description: Hub API (desktop on Windows Mobile Hotspot)
+tags:
+  - name: auth
+  - name: tasks
+  - name: hub-online
+    description: Desktop hub ↔ Online
+  - name: hub-device
+    description: Mobile ↔ Desktop hub
+
+paths:
+  # ---------------------------------------------------------------- Online: auth
+  /api/v1/auth/login:
+    post:
+      tags: [auth]
+      operationId: login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string }
+                device_name: { type: string, description: Token name, defaults to "admin-portal" }
+      responses:
+        "200":
+          description: Logged in
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [token, user]
+                        properties:
+                          token: { type: string }
+                          user: { $ref: "#/components/schemas/User" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+        "429": { $ref: "#/components/responses/Error" }
+  /api/v1/auth/logout:
+    post:
+      tags: [auth]
+      operationId: logout
+      responses:
+        "200": { $ref: "#/components/responses/EmptySuccess" }
+        "401": { $ref: "#/components/responses/Error" }
+  /api/v1/auth/me:
+    get:
+      tags: [auth]
+      operationId: me
+      responses:
+        "200":
+          description: Current user
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/User" }
+        "401": { $ref: "#/components/responses/Error" }
+
+  # ---------------------------------------------------------------- Online: tasks (admin)
+  /api/v1/tasks:
+    get:
+      tags: [tasks]
+      operationId: listTasks
+      parameters:
+        - { name: "filter[type]", in: query, schema: { $ref: "#/components/schemas/TaskType" } }
+        - { name: "filter[status]", in: query, schema: { $ref: "#/components/schemas/TaskStatus" } }
+        - { name: "filter[q]", in: query, description: Search by name, schema: { type: string } }
+        - name: sort
+          in: query
+          schema: { type: string, enum: [name, -name, updated_at, -updated_at], default: -updated_at }
+        - { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: per_page, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 15 } }
+      responses:
+        "200":
+          description: Paginated tasks (paginator spread into the envelope; rows at `data`)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    required: [data, links, meta]
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/Task" }
+                      links: { $ref: "#/components/schemas/PaginationLinks" }
+                      meta: { $ref: "#/components/schemas/PaginationMeta" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+    post:
+      tags: [tasks]
+      operationId: createTask
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TaskInput" }
+      responses:
+        "201": { $ref: "#/components/responses/TaskResponse" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+  /api/v1/tasks/{task}:
+    parameters:
+      - { name: task, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [tasks]
+      operationId: getTask
+      parameters:
+        - name: include
+          in: query
+          description: "`statusUpdates` adds the status update history (newest first)."
+          schema: { type: string, enum: [statusUpdates] }
+      responses:
+        "200": { $ref: "#/components/responses/TaskResponse" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    put:
+      tags: [tasks]
+      operationId: updateTask
+      description: Fields left out are unchanged. Any change increments `version`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TaskPatch" }
+      responses:
+        "200": { $ref: "#/components/responses/TaskResponse" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+    delete:
+      tags: [tasks]
+      operationId: deleteTask
+      description: Soft delete. Later updates for this task are stored as `rejected(task_not_found)`.
+      responses:
+        "200": { $ref: "#/components/responses/EmptySuccess" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  # ---------------------------------------------------------------- Online: hub sync
+  /api/v1/hub/tasks:
+    get:
+      tags: [hub-online]
+      operationId: hubTaskSnapshot
+      description: Full snapshot of non-deleted tasks. Requires a token with the `hub.sync` ability.
+      responses:
+        "200":
+          description: Snapshot
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/TaskSnapshot" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /api/v1/hub/task-updates:
+    post:
+      tags: [hub-online]
+      operationId: hubPushTaskUpdates
+      description: Idempotent by update `id`. Each item is processed in its own transaction.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [hub_id, items]
+              properties:
+                hub_id: { type: string, format: uuid }
+                items:
+                  type: array
+                  minItems: 1
+                  maxItems: 200
+                  items: { $ref: "#/components/schemas/HubTaskStatusUpdate" }
+      responses:
+        "200":
+          description: Per-item results
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [results]
+                        properties:
+                          results:
+                            type: array
+                            items: { $ref: "#/components/schemas/ItemResult" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+
+  # ---------------------------------------------------------------- Hub: device API
+  /v1/pair:
+    post:
+      tags: [hub-device]
+      operationId: pairDevice
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [pairing_token, device_name, platform, app_version]
+              properties:
+                pairing_token: { type: string }
+                device_name: { type: string, maxLength: 100 }
+                platform: { type: string, enum: [android, ios] }
+                app_version: { type: string }
+      responses:
+        "200":
+          description: Paired
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [device_id, device_secret, hub_id]
+                properties:
+                  device_id: { type: string, format: uuid }
+                  device_secret: { type: string, description: Shown once; store in secure storage }
+                  hub_id: { type: string, format: uuid }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/Problem" }
+  /v1/ping:
+    post:
+      tags: [hub-device]
+      operationId: ping
+      security: [{ device: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [pending_count, last_seq]
+              properties:
+                pending_count: { type: integer, minimum: 0 }
+                last_seq: { type: integer, minimum: 0 }
+      responses:
+        "200":
+          description: Heartbeat acknowledged
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sync_requested, server_time]
+                properties:
+                  sync_requested: { type: boolean }
+                  server_time: { type: string, format: date-time }
+        "401": { $ref: "#/components/responses/Problem" }
+  /v1/sync/hello:
+    post:
+      tags: [hub-device]
+      operationId: syncHello
+      security: [{ device: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [last_seq, pending_count, device_time]
+              properties:
+                last_seq: { type: integer, minimum: 0 }
+                pending_count: { type: integer, minimum: 0 }
+                device_time: { type: string, format: date-time }
+      responses:
+        "200":
+          description: Handshake accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [expected_from_seq, server_time]
+                properties:
+                  expected_from_seq:
+                    type: integer
+                    description: First device_seq the hub has not stored yet.
+                  server_time: { type: string, format: date-time }
+        "401": { $ref: "#/components/responses/Problem" }
+  /v1/sync/push:
+    post:
+      tags: [hub-device]
+      operationId: syncPush
+      security: [{ device: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [items]
+              properties:
+                items:
+                  type: array
+                  minItems: 1
+                  maxItems: 200
+                  items: { $ref: "#/components/schemas/DeviceTaskStatusUpdate" }
+      responses:
+        "200":
+          description: Per-item results; every result means "durably stored on the hub".
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [results, seq_gap_detected]
+                properties:
+                  results:
+                    type: array
+                    items: { $ref: "#/components/schemas/ItemResult" }
+                  seq_gap_detected: { type: boolean }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+  /v1/sync/snapshot:
+    get:
+      tags: [hub-device]
+      operationId: syncSnapshot
+      security: [{ device: [] }]
+      responses:
+        "200":
+          description: Tasks for this device (demo — all tasks)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [dataset_version, tasks]
+                properties:
+                  dataset_version: { type: [string, "null"] }
+                  tasks:
+                    type: array
+                    items: { $ref: "#/components/schemas/Task" }
+        "401": { $ref: "#/components/responses/Problem" }
+
+components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+      description: Sanctum personal access token (admin, or hub with `hub.sync` ability).
+    device:
+      type: apiKey
+      in: header
+      name: Authorization
+      description: "`Device <device_id>:<device_secret>`"
+
+  responses:
+    Error:
+      description: Error envelope
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+    ValidationError:
+      description: Validation failed
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+    EmptySuccess:
+      description: Success without data
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Envelope" }
+    TaskResponse:
+      description: A task
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/Envelope"
+              - type: object
+                properties:
+                  data: { $ref: "#/components/schemas/Task" }
+    Problem:
+      description: RFC 9457 problem details
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/ProblemDetails" }
+
+  schemas:
+    Envelope:
+      type: object
+      required: [success, message]
+      properties:
+        success: { type: boolean }
+        message: { type: string }
+        data: {}
+    ErrorEnvelope:
+      type: object
+      required: [success, message]
+      properties:
+        success: { type: boolean, const: false }
+        message: { type: string }
+        errors:
+          type: object
+          additionalProperties:
+            type: array
+            items: { type: string }
+    ProblemDetails:
+      type: object
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+    PaginationLinks:
+      type: object
+      properties:
+        first: { type: [string, "null"] }
+        last: { type: [string, "null"] }
+        prev: { type: [string, "null"] }
+        next: { type: [string, "null"] }
+    PaginationMeta:
+      type: object
+      required: [current_page, last_page, per_page, total]
+      properties:
+        current_page: { type: integer }
+        from: { type: [integer, "null"] }
+        last_page: { type: integer }
+        per_page: { type: integer }
+        to: { type: [integer, "null"] }
+        total: { type: integer }
+
+    User:
+      type: object
+      required: [id, name, email, role]
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        email: { type: string, format: email }
+        role: { type: string, enum: [admin, hub] }
+
+    TaskType:
+      type: string
+      enum: [chef, guard]
+    TaskStatus:
+      type: string
+      enum: [pending, in_progress, done]
+    UpdateResult:
+      type: string
+      enum: [accepted, already_received, conflict, rejected]
+
+    Task:
+      type: object
+      required: [id, name, type, description, status, version, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string, maxLength: 150 }
+        type: { $ref: "#/components/schemas/TaskType" }
+        description: { type: [string, "null"] }
+        status: { $ref: "#/components/schemas/TaskStatus" }
+        version: { type: integer, minimum: 1 }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        status_updates:
+          description: Present only with `include=statusUpdates`.
+          type: array
+          items: { $ref: "#/components/schemas/TaskStatusUpdate" }
+    TaskInput:
+      type: object
+      required: [name, type]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 150 }
+        type: { $ref: "#/components/schemas/TaskType" }
+        description: { type: [string, "null"], maxLength: 2000 }
+        status: { $ref: "#/components/schemas/TaskStatus" }
+    TaskPatch:
+      type: object
+      properties:
+        name: { type: string, minLength: 1, maxLength: 150 }
+        type: { $ref: "#/components/schemas/TaskType" }
+        description: { type: [string, "null"], maxLength: 2000 }
+        status: { $ref: "#/components/schemas/TaskStatus" }
+    TaskSnapshot:
+      type: object
+      required: [dataset_version, checksum, tasks]
+      properties:
+        dataset_version:
+          type: [string, "null"]
+          description: Latest task `updated_at` (ISO 8601), null when there are no tasks.
+        checksum:
+          type: string
+          description: sha256 hex of the task `id:version` pairs sorted by id, joined with `\n`.
+        tasks:
+          type: array
+          items: { $ref: "#/components/schemas/Task" }
+
+    DeviceTaskStatusUpdate:
+      description: A status update as created on the mobile device.
+      type: object
+      required: [id, task_id, from_status, to_status, base_version, device_seq, device_created_at]
+      properties:
+        id: { type: string, format: uuid, description: UUIDv7 generated on the device }
+        task_id: { type: string, format: uuid }
+        from_status: { $ref: "#/components/schemas/TaskStatus" }
+        to_status: { $ref: "#/components/schemas/TaskStatus" }
+        base_version: { type: integer, minimum: 1, description: Task version the device saw }
+        device_seq: { type: integer, minimum: 1 }
+        device_created_at: { type: string, format: date-time, description: Informational only }
+    HubTaskStatusUpdate:
+      description: A status update as uploaded by the hub to Online.
+      allOf:
+        - $ref: "#/components/schemas/DeviceTaskStatusUpdate"
+        - type: object
+          required: [device_id, hub_received_at]
+          properties:
+            device_id: { type: string, format: uuid }
+            hub_received_at: { type: string, format: date-time }
+            base_version:
+              type: integer
+              minimum: 1
+              description: Online task version the hub last downloaded (`web_base_version`).
+    TaskStatusUpdate:
+      description: A stored status update (Online history).
+      type: object
+      required:
+        [id, task_id, from_status, to_status, base_version, device_id, device_seq,
+         device_created_at, hub_id, hub_received_at, result, reject_reason, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        task_id: { type: string, format: uuid }
+        from_status: { $ref: "#/components/schemas/TaskStatus" }
+        to_status: { $ref: "#/components/schemas/TaskStatus" }
+        base_version: { type: integer }
+        device_id: { type: string, format: uuid }
+        device_seq: { type: integer }
+        device_created_at: { type: string, format: date-time }
+        hub_id: { type: string, format: uuid }
+        hub_received_at: { type: string, format: date-time }
+        result:
+          type: string
+          enum: [accepted, conflict, rejected]
+        reject_reason: { type: [string, "null"] }
+        created_at: { type: string, format: date-time }
+    ItemResult:
+      type: object
+      required: [id, result]
+      properties:
+        id: { type: string, format: uuid }
+        result: { $ref: "#/components/schemas/UpdateResult" }
+        reason:
+          type: [string, "null"]
+          description: For `rejected`, e.g. `task_not_found`, `invalid_transition`.
+        task_version:
+          type: [integer, "null"]
+          description: Task version after this update was applied (null when rejected).
+
+security:
+  - bearer: []

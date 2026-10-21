@@ -1,0 +1,22 @@
+name: desktop
+
+on:
+  push:
+    paths: ["paxscan-desktop/**", "contracts/**", ".github/workflows/desktop.yml"]
+  pull_request:
+    paths: ["paxscan-desktop/**", "contracts/**", ".github/workflows/desktop.yml"]
+
+jobs:
+  build:
+    # WPF only builds and runs on Windows.
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: paxscan-desktop
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: paxscan-desktop/global.json
+      - run: dotnet build PaxScan.slnx -c Release
+      - run: dotnet test --solution PaxScan.slnx -c Release --no-build

@@ -1,0 +1,32 @@
+name: frontend
+
+on:
+  push:
+    paths: ["paxscan-online/frontend/**", "contracts/**", ".github/workflows/frontend.yml"]
+  pull_request:
+    paths: ["paxscan-online/frontend/**", "contracts/**", ".github/workflows/frontend.yml"]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: paxscan-online/frontend
+    env:
+      LARAVEL_API_URL: http://localhost:8000
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: paxscan-online/frontend/package-lock.json
+      - run: npm ci
+      - name: Contract lint
+        run: npx --yes @stoplight/spectral-cli@6 lint ../../contracts/openapi.yaml --ruleset ../../contracts/.spectral.yaml --fail-severity error
+      - name: Generated API types are up to date
+        run: npm run gen:api && git diff --exit-code types/api.d.ts
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build

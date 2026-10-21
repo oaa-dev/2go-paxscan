@@ -1,0 +1,29 @@
+name: paxscan_app
+description: PaxScan mobile — offline task updates synced with the desktop hub.
+publish_to: none
+version: 0.1.0+1
+resolution: workspace
+
+environment:
+  sdk: ^3.13.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_riverpod: ^3.4.3
+  flutter_secure_storage: ^11.2.0
+  go_router: ^18.1.0
+  mobile_scanner: ^7.4.2
+  path_provider: ^2.1.6
+  paxscan_core:
+    path: ../packages/paxscan_core
+
+  riverpod: any
+dev_dependencies:
+  drift: ^2.35.2
+  flutter_test:
+    sdk: flutter
+  very_good_analysis: ^11.0.0
+
+flutter:
+  uses-material-design: true

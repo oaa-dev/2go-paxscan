@@ -1,0 +1,38 @@
+name: backend
+
+on:
+  push:
+    paths: ["paxscan-online/backend/**", "contracts/**", ".github/workflows/backend.yml"]
+  pull_request:
+    paths: ["paxscan-online/backend/**", "contracts/**", ".github/workflows/backend.yml"]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: paxscan-online/backend
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: paxscan
+          POSTGRES_PASSWORD: paxscan
+          POSTGRES_DB: paxscan_testing
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U paxscan" --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      DB_HOST: 127.0.0.1
+    steps:
+      - uses: actions/checkout@v5
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.5"
+          extensions: pdo_pgsql, intl, zip, bcmath
+          coverage: none
+      - run: composer install --no-interaction --prefer-dist --no-progress
+      - run: cp .env.example .env && php artisan key:generate
+      - run: vendor/bin/pint --test
+      - run: vendor/bin/phpstan analyse --memory-limit=1G --no-progress
+      - run: vendor/bin/pest

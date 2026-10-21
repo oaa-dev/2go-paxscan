@@ -1,0 +1,42 @@
+# OS / editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+
+# Secrets
+.env
+.env.*
+!.env.example
+*.pfx
+*.p12
+
+# Laravel (paxscan-online/backend has its own .gitignore too)
+/paxscan-online/backend/vendor/
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+
+# .NET
+bin/
+obj/
+*.user
+.vs/
+TestResults/
+
+# Flutter / Dart
+.dart_tool/
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+*.iml
+
+# EF Core design-time database
+**/design-time.db*
+
+# Knowledge Garden local config
+kg.local.md
